@@ -118,3 +118,89 @@ export interface AIShotDecision {
   power: number;
   targetBallId: number;
 }
+
+export type TaskType =
+  | 'COMPLETE_8BALL_GAMES'
+  | 'SINGLE_BREAK_5_PLUS'
+  | 'DEFEAT_HARD_AI'
+  | 'TOTAL_SHOTS'
+  | 'WIN_STREAK'
+  | 'POCKET_BALLS'
+  | 'CLEAN_SHEET_WINS';
+
+export type TaskFrequency = 'daily' | 'weekly';
+
+export interface TaskDefinition {
+  id: string;
+  type: TaskType;
+  frequency: TaskFrequency;
+  title: string;
+  description: string;
+  targetValue: number;
+  xpReward: number;
+  icon: string;
+}
+
+export interface TaskProgress {
+  taskId: string;
+  currentValue: number;
+  completed: boolean;
+  claimed: boolean;
+}
+
+export type RewardType = 'CUE_SKIN' | 'TABLE_CLOTH' | 'CUE_BALL_PATTERN' | 'CHALK' | 'PORTRAIT_FRAME';
+
+export interface CosmeticItem {
+  id: string;
+  name: string;
+  type: RewardType;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
+  description: string;
+  color?: string;
+  gradientFrom?: string;
+  gradientTo?: string;
+  pattern?: string;
+}
+
+export interface PassReward {
+  level: number;
+  free?: CosmeticItem | { xpBonus: number };
+  premium?: CosmeticItem | { xpBonus: number };
+}
+
+export interface BattlePassSeason {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  totalLevels: number;
+  xpPerLevel: number;
+  rewards: PassReward[];
+}
+
+export interface BattlePassState {
+  seasonId: string;
+  currentLevel: number;
+  currentXp: number;
+  isPremium: boolean;
+  dailyTasks: TaskProgress[];
+  weeklyTasks: TaskProgress[];
+  claimedLevels: number[];
+  lastDailyReset: string;
+  lastWeeklyReset: string;
+  unlockedItems: string[];
+}
+
+export interface GameSessionStats {
+  is8Ball: boolean;
+  gameCompleted: boolean;
+  won: boolean;
+  opponentDifficulty?: 'easy' | 'hard';
+  isAI: boolean;
+  pocketedBallsThisShot: number[];
+  maxPocketedSingleShot: number;
+  totalShots: number;
+  totalPocketedBalls: number;
+  cleanSheet: boolean;
+  isPlayerTurn: boolean;
+}

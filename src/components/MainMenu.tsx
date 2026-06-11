@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
-import { CircleDot, Trophy, Users, Bot, ChevronRight, Play, BookOpenCheck } from 'lucide-react';
+import { CircleDot, Trophy, Users, Bot, ChevronRight, Play, BookOpenCheck, Star } from 'lucide-react';
 import { useGameStore } from '../stores/useGameStore';
+import { useBattlePassStore } from '../stores/useBattlePassStore';
 import type { GameMode, PlayMode } from '../game/types';
 import { loadSettings, saveSettings } from '../utils/storage';
 import { useEffect, useState } from 'react';
@@ -12,6 +13,15 @@ export default function MainMenu() {
   const setSelectedPlayMode = useGameStore((s) => s.setSelectedPlayMode);
   const setSelectedAIDifficulty = useGameStore((s) => s.setSelectedAIDifficulty);
   const setMenuTab = useGameStore((s) => s.setMenuTab);
+
+  const bpLevel = useBattlePassStore((s) => s.currentLevel);
+  const bpXp = useBattlePassStore((s) => s.currentXp);
+  const isPremium = useBattlePassStore((s) => s.isPremium);
+  const dailyTasks = useBattlePassStore((s) => s.dailyTasks);
+  const weeklyTasks = useBattlePassStore((s) => s.weeklyTasks);
+
+  const pendingClaims = dailyTasks.filter((t) => t.completed && !t.claimed).length
+    + weeklyTasks.filter((t) => t.completed && !t.claimed).length;
 
   const [mode, setMode] = useState<GameMode>('8ball');
   const [playMode, setPlayMode] = useState<PlayMode>('pve');
@@ -34,6 +44,11 @@ export default function MainMenu() {
   const gotoReplays = () => {
     setMenuTab('replays');
     navigate('/replays');
+  };
+
+  const gotoBattlePass = () => {
+    setMenuTab('battlepass');
+    navigate('/battlepass');
   };
 
   return (
@@ -70,7 +85,46 @@ export default function MainMenu() {
           </div>
         </div>
 
-        <div className="w-full max-w-md space-y-6">
+        <div className="w-full max-w-md space-y-4">
+          <button
+            onClick={gotoBattlePass}
+            className="w-full group relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600/40 via-purple-600/40 to-pink-600/40 backdrop-blur-xl border border-indigo-400/30 p-4 shadow-2xl hover:border-indigo-400/60 hover:shadow-indigo-500/20 transition-all hover:scale-[1.01]"
+          >
+            <div className="absolute top-0 right-0 w-40 h-40 bg-gradient-to-br from-amber-400/20 to-transparent rounded-full -translate-y-1/2 translate-x-1/2 blur-2xl" />
+            <div className="relative z-10 flex items-center gap-4">
+              <div className="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
+                <Trophy size={28} className="text-white" />
+                {pendingClaims > 0 && (
+                  <div className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full bg-rose-500 border-2 border-zinc-900 flex items-center justify-center text-white text-xs font-bold animate-pulse">
+                    {pendingClaims}
+                  </div>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <h3 className="font-bold text-white text-lg">赛季通行证</h3>
+                  {isPremium && (
+                    <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-yellow-500 text-amber-900 text-[10px] font-bold flex items-center gap-0.5">
+                      <Star size={10} fill="currentColor" />
+                      高级
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-baseline gap-2 mb-2">
+                  <span className="text-2xl font-black text-white">Lv.{bpLevel}</span>
+                  <span className="text-xs text-white/60">{bpXp.toLocaleString()} / 1,000 XP</span>
+                </div>
+                <div className="h-1.5 bg-black/30 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-emerald-300 via-cyan-300 to-teal-300 rounded-full transition-all"
+                    style={{ width: `${(bpXp / 1000) * 100}%` }}
+                  />
+                </div>
+              </div>
+              <ChevronRight size={24} className="text-white/50 group-hover:text-white/90 group-hover:translate-x-1 transition-all" />
+            </div>
+          </button>
+
           <div className="rounded-2xl bg-zinc-900/60 backdrop-blur-xl border border-zinc-700/50 p-6 shadow-2xl">
             <div className="text-xs uppercase tracking-widest text-zinc-500 mb-4 font-bold">游戏模式</div>
             <div className="grid grid-cols-2 gap-3 mb-6">

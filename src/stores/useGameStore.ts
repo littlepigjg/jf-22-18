@@ -1,19 +1,18 @@
 import { create } from 'zustand';
 import type {
   Ball,
-  FoulType,
   GameMode,
   GamePhase,
   GameState,
   Player,
   PlayMode,
   Shot,
+  GameSessionStats,
 } from '../game/types';
 import { FoulType as FoulTypeEnum } from '../game/types';
 import {
   MAX_POWER,
   TABLE,
-  FOUL_MESSAGES,
 } from '../game/constants';
 import { setupBalls, resetCueBall, placeCueBall } from '../game/table-setup';
 import { applyShot, allBallsStopped, stepPhysics } from '../game/physics';
@@ -28,6 +27,14 @@ import {
 } from '../game/replay';
 import { saveReplay } from '../utils/storage';
 
+interface SessionStats {
+  maxPocketedSingleShot: number;
+  totalShotsByPlayer: number;
+  totalPocketedByPlayer: number;
+  playerScoreAtEnd: number;
+  opponentScoreAtEnd: number;
+}
+
 interface UIState {
   aimAngle: number;
   power: number;
@@ -36,11 +43,12 @@ interface UIState {
   selectedGameMode: GameMode;
   selectedPlayMode: PlayMode;
   selectedAIDifficulty: 'easy' | 'hard';
-  menuTab: 'home' | 'replays';
+  menuTab: 'home' | 'replays' | 'battlepass';
   replayId: string | null;
   replayProgress: number;
   replayPlaying: boolean;
   replaySpeed: number;
+  sessionStats: SessionStats;
 }
 
 interface GameStore extends GameState, UIState {
@@ -63,7 +71,7 @@ interface GameStore extends GameState, UIState {
   setSelectedGameMode: (m: GameMode) => void;
   setSelectedPlayMode: (m: PlayMode) => void;
   setSelectedAIDifficulty: (d: 'easy' | 'hard') => void;
-  setMenuTab: (t: 'home' | 'replays') => void;
+  setMenuTab: (t: 'home' | 'replays' | 'battlepass') => void;
   setReplayId: (id: string | null) => void;
   setReplayProgress: (p: number) => void;
   setReplayPlaying: (p: boolean) => void;
@@ -97,6 +105,14 @@ function createPlayers(
   return [p1, p2];
 }
 
+const initialSessionStats: SessionStats = {
+  maxPocketedSingleShot: 0,
+  totalShotsByPlayer: 0,
+  totalPocketedByPlayer: 0,
+  playerScoreAtEnd: 0,
+  opponentScoreAtEnd: 0,
+};
+
 export const useGameStore = create<GameStore>((set, get) => ({
   mode: '8ball',
   playMode: 'pvp',
@@ -128,6 +144,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   replayProgress: 0,
   replayPlaying: false,
   replaySpeed: 1,
+  sessionStats: { ...initialSessionStats },
 
   startGame: (mode, playMode, aiDifficulty) => {
     const balls = setupBalls(mode);
@@ -154,6 +171,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       aimAngle: 0,
       power: 0,
       isCharging: false,
+      sessionStats: { ...initialSessionStats },
     });
   },
 
@@ -180,6 +198,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   releaseShot: () => {
     const s = get();
     if (!s.isCharging) return;
+    const isPlayerTurn = !s.players.find((p) => p.id === s.currentPlayerId)?.isAI;
     const shot: Shot = {
       aimAngle: s.aimAngle,
       power: s.power,
@@ -191,6 +210,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
     };
     applyShot(s.balls, s.aimAngle, s.power, MAX_POWER);
     recordReplayShot(shot);
+
+    if (isPlayerTurn) {
+      import('../stores/useBattlePassStore').then(({ useBattlePassStore }) => {
+        useBattlePassStore.getState().processShotTaken(true);
+      });
+      set((state) => ({
+        sessionStats: {
+          ...state.sessionStats,
+          totalShotsByPlayer: state.sessionStats.totalShotsByPlayer + 1,
+        },
+      }));
+    }
+
     set({ isCharging: false, currentShot: shot, phase: 'simulating', power: 0 });
   },
 
@@ -237,8 +269,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (s.phase !== 'resolving' || !s.currentShot) return;
 
     const currentPlayer = s.players.find((p) => p.id === s.currentPlayerId)!;
+    const isPlayerTurn = !currentPlayer.isAI;
     const foulResult = checkFoul(s.mode, s.balls, s.currentShot, currentPlayer, s.groupsAssigned);
     s.currentShot.foul = foulResult.foul;
+
+    const pocketedCount = s.currentShot.pocketedBalls.filter((id) => id !== 0).length;
+
+    if (isPlayerTurn && pocketedCount > 0) {
+      import('../stores/useBattlePassStore').then(({ useBattlePassStore }) => {
+        useBattlePassStore.getState().processShotComplete(pocketedCount, true);
+      });
+    }
 
     const resolve = resolveShot(
       s.mode,
@@ -269,9 +310,40 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const legalBall = s.balls.find((b) => b.id === legalBalls[0]);
     const hint = resolve.hintMessage || (legalBall ? `目标球: ${legalBall.id}号` : null);
 
+    let newMaxPocketed = s.sessionStats.maxPocketedSingleShot;
+    let newTotalPocketed = s.sessionStats.totalPocketedByPlayer;
+    if (isPlayerTurn && pocketedCount > 0) {
+      newMaxPocketed = Math.max(newMaxPocketed, pocketedCount);
+      newTotalPocketed = newTotalPocketed + pocketedCount;
+    }
+
     if (resolve.gameOver && resolve.winnerId !== undefined) {
       stopRecording();
       const winner = updatedPlayers.find((p) => p.id === resolve.winnerId) || null;
+      const humanPlayer = updatedPlayers.find((p) => !p.isAI);
+      const aiPlayer = updatedPlayers.find((p) => p.isAI);
+      const playerWon = winner && !winner.isAI;
+      const opponentScore = s.playMode === 'pve' ? (aiPlayer?.score ?? 0) : (updatedPlayers.find((p) => p.id !== (humanPlayer?.id ?? 0))?.score ?? 0);
+      const cleanSheet = playerWon && opponentScore === 0;
+
+      const finalStats: GameSessionStats = {
+        is8Ball: s.mode === '8ball',
+        gameCompleted: true,
+        won: !!playerWon,
+        opponentDifficulty: s.playMode === 'pve' ? s.selectedAIDifficulty : undefined,
+        isAI: s.playMode === 'pve',
+        pocketedBallsThisShot: [],
+        maxPocketedSingleShot: Math.max(newMaxPocketed, pocketedCount),
+        totalShots: s.sessionStats.totalShotsByPlayer,
+        totalPocketedBalls: newTotalPocketed,
+        cleanSheet: !!cleanSheet,
+        isPlayerTurn: true,
+      };
+
+      import('../stores/useBattlePassStore').then(({ useBattlePassStore }) => {
+        useBattlePassStore.getState().processGameEnd(finalStats);
+      });
+
       set({
         players: updatedPlayers,
         winner,
@@ -282,6 +354,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         targetBallHint: resolve.hintMessage,
         replayRecording: false,
         groupsAssigned,
+        sessionStats: {
+          ...s.sessionStats,
+          maxPocketedSingleShot: newMaxPocketed,
+          totalPocketedByPlayer: newTotalPocketed,
+          playerScoreAtEnd: humanPlayer?.score ?? 0,
+          opponentScoreAtEnd: opponentScore,
+        },
       });
       return;
     }
@@ -305,6 +384,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
       turnNumber,
       phase: 'aiming',
       currentShot: null,
+      sessionStats: {
+        ...s.sessionStats,
+        maxPocketedSingleShot: newMaxPocketed,
+        totalPocketedByPlayer: newTotalPocketed,
+      },
     });
   },
 
